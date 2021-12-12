@@ -239,6 +239,31 @@ func (k Keeper) RevokeApproval(ctx sdk.Context, denomID, tokenID string, sender,
 		"Approve failed - could not revoke access for (%s)! Sender address (%s) is neither owner or approved for denomId (%s) / tokenId (%s)! ", addressToRevoke, sender, denomID, tokenID)
 }
 
+func (k Keeper) SendToEth(ctx sdk.Context, denomID, tokenID, ethAddress string, sender sdk.AccAddress) error {
+	// call to transfer method
+	panic("SendToEth not implemented")
+
+	// remove this line and finish the method once we know more
+	if !k.HasDenomID(ctx, denomID) {
+		return sdkerrors.Wrapf(types.ErrInvalidDenom, "denom ID %s not exists", denomID)
+	}
+
+	nft, err := k.GetBaseNFT(ctx, denomID, tokenID)
+	if err != nil {
+		return err
+	}
+
+	if !sender.Equals(nft.GetOwner()) {
+		return sdkerrors.Wrapf(types.ErrUnauthorized,
+			"From [%s] is not the owner of NFT with denomId [%s] / tokenId [%s]. The owner is [%s]", sender.String(), denomID, tokenID, nft.GetOwner())
+	}
+
+	// transfer here
+
+	return sdkerrors.Wrapf(types.ErrUnauthorized,
+		"Sender [%s] is neither owner or approved for transfer of denomId [%s] / tokenId [%s]", sender.String(), denomID, tokenID)
+}
+
 // Todo: check if we need this to be private. For example, right now its defined in the keeper
 // if it is accessible from there - it means all the check are bypassed ??
 func revokeApprovalNFT(nft types.BaseNFT, approvedAddress sdk.AccAddress, denomID string) error {
