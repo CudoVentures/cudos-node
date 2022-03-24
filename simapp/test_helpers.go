@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
+	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 
 	// minttypes "github.com/irisnet/irishub/x/cudosmint/types"
 
@@ -101,13 +103,54 @@ func NewConfig() network.Config {
 	return cfg
 }
 
+type validatorAppEntry struct {
+	app        *SimApp
+	ctx        sdk.Context
+	val        network.Validator
+	ethAddress types.EthAddress
+}
+
+var valAppEntries []validatorAppEntry
+
 func SimAppConstructor(val network.Validator) servertypes.Application {
-	return NewSimApp(
+	app := NewSimApp(
 		val.Ctx.Logger, dbm.NewMemDB(), nil, true, make(map[int64]bool),
 		val.Ctx.Config.RootDir, 0, MakeTestEncodingConfig(), EmptyAppOptions{},
 		bam.SetPruning(storetypes.NewPruningOptionsFromString(val.AppConfig.Pruning)),
 		bam.SetMinGasPrices(val.AppConfig.MinGasPrices),
 	)
+
+	baseEthAddress := "0x0000000000000000000000000000000000000000"
+	idxStr := strconv.Itoa(len(valAppEntries))
+
+	ctx := app.BaseApp.NewUncachedContext(true, tmproto.Header{})
+	app.GravityKeeper.SetStaticValCosmosAddr(ctx, val.Address.String())
+	app.GravityKeeper.SetOrchestratorValidator(ctx, val.ValAddress, val.Address)
+	ethAddress, err := types.NewEthAddress(baseEthAddress[:len(baseEthAddress)-len(idxStr)] + idxStr)
+	if err != nil {
+		panic(err)
+	}
+	app.GravityKeeper.SetEthAddressForValidator(ctx, val.ValAddress, *ethAddress)
+
+	for i := range valAppEntries {
+		// Set the new validator on the previous app entry
+		valAppEntries[i].app.GravityKeeper.SetStaticValCosmosAddr(valAppEntries[i].ctx, val.Address.String())
+		valAppEntries[i].app.GravityKeeper.SetOrchestratorValidator(valAppEntries[i].ctx, val.ValAddress, val.Address)
+		valAppEntries[i].app.GravityKeeper.SetEthAddressForValidator(valAppEntries[i].ctx, val.ValAddress, *ethAddress)
+
+		// Set the previous validator on the new app entry
+		app.GravityKeeper.SetStaticValCosmosAddr(ctx, valAppEntries[i].val.Address.String())
+		app.GravityKeeper.SetOrchestratorValidator(ctx, valAppEntries[i].val.ValAddress, valAppEntries[i].val.Address)
+		app.GravityKeeper.SetEthAddressForValidator(ctx, valAppEntries[i].val.ValAddress, valAppEntries[i].ethAddress)
+	}
+
+	valAppEntries = append(valAppEntries, validatorAppEntry{
+		app:        app,
+		ctx:        ctx,
+		val:        val,
+		ethAddress: *ethAddress,
+	})
+	return app
 }
 
 // SetupWithGenesisValSet initializes a new SimApp with a validator set and genesis accounts
