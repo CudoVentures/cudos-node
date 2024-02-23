@@ -3,16 +3,16 @@
 # the upgrade is a fork, "true" otherwise
 FORK=${FORK:-"false"}
 
-OLD_VERSION=v1.1.0
+OLD_VERSION=v1.2.0
 UPGRADE_WAIT=${UPGRADE_WAIT:-20}
 HOME=cudos-data
 ROOT=$(pwd)
 DENOM=acudos
 CHAIN_ID=cudos-node
-SOFTWARE_UPGRADE_NAME="v1.2"
+SOFTWARE_UPGRADE_NAME="v1.3"
 ADDITIONAL_PRE_SCRIPTS=${ADDITIONAL_PRE_SCRIPTS:-""}
 ADDITIONAL_AFTER_SCRIPTS=${ADDITIONAL_AFTER_SCRIPTS:-""}
-NEW_VERSION=v1.2.0
+NEW_VERSION=v1.3.0
 if [[ "$FORK" == "true" ]]; then
     export cudos-noded_HALT_HEIGHT=20
 fi
@@ -39,6 +39,7 @@ fi
 # install new binary
 if ! command -v _build/new/cudos-noded &> /dev/null
 then
+    echo "Installing new binary"
     mkdir -p ./_build/cudos-node-${NEW_VERSION:1} && cd ./_build/cudos-node-${NEW_VERSION:1}
     GOBIN="$ROOT/_build/new" go install -mod=readonly ../../...
     cd ../..

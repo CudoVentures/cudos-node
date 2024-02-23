@@ -5,16 +5,16 @@ import (
 
 	"github.com/CudoVentures/cudos-node/app"
 	"github.com/CudoVentures/cudos-node/app/apptesting"
+	appparams "github.com/CudoVentures/cudos-node/app/params"
+	cometbftdb "github.com/cometbft/cometbft-db"
+	"github.com/cometbft/cometbft/libs/log"
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/simapp"
-	simappparams "github.com/cosmos/cosmos-sdk/simapp/params"
+	sims "github.com/cosmos/cosmos-sdk/testutil/sims"
 	"github.com/cosmos/cosmos-sdk/testutil/testdata"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/stretchr/testify/suite"
-	"github.com/tendermint/tendermint/libs/log"
-	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
-	dbm "github.com/tendermint/tm-db"
 )
 
 type AnteTestSuite struct {
@@ -25,8 +25,7 @@ type AnteTestSuite struct {
 
 // returns context and app with params set on account keeper
 func createTestApp(isCheckTx bool, tempDir string) (*app.App, sdk.Context) {
-	db := dbm.NewMemDB()
-	encCdc := app.MakeEncodingConfig()
+	db := cometbftdb.NewMemDB()
 
 	cudosApp := app.New(
 		log.NewNopLogger(),
@@ -36,8 +35,7 @@ func createTestApp(isCheckTx bool, tempDir string) (*app.App, sdk.Context) {
 		map[int64]bool{},
 		tempDir,
 		5,
-		encCdc,
-		simapp.EmptyAppOptions{},
+		sims.EmptyAppOptions{},
 	)
 	ctx := cudosApp.BaseApp.NewContext(isCheckTx, tmproto.Header{})
 	cudosApp.AccountKeeper.SetParams(ctx, authtypes.DefaultParams())
@@ -58,8 +56,8 @@ func (suite *AnteTestSuite) SetupTest(isCheckTx bool) {
 		WithTxConfig(encodingConfig.TxConfig)
 }
 
-func (suite *AnteTestSuite) SetupEncoding() simappparams.EncodingConfig {
-	encodingConfig := simapp.MakeTestEncodingConfig()
+func (suite *AnteTestSuite) SetupEncoding() appparams.EncodingConfig {
+	encodingConfig := app.MakeEncodingConfig()
 	// We're using TestMsg encoding in some tests, so register it here.
 	encodingConfig.Amino.RegisterConcrete(&testdata.TestMsg{}, "testdata.TestMsg", nil)
 	testdata.RegisterInterfaces(encodingConfig.InterfaceRegistry)

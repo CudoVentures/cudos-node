@@ -11,9 +11,9 @@ import (
 
 func main() {
 	sdk.DefaultPowerReduction = sdk.NewIntFromUint64(1000000000000000000)
-	app.SetConfig()
 	rootCmd, _ := cmd.NewRootCmd()
-	if err := svrcmd.Execute(rootCmd, app.DefaultNodeHome); err != nil {
+	// TODO: decide the env prefix, currently empty
+	if err := svrcmd.Execute(rootCmd, "", app.DefaultNodeHome); err != nil {
 		os.Exit(1)
 	}
 }

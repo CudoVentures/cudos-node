@@ -5,34 +5,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosmos/cosmos-sdk/testutil/mock"
+
 	"github.com/CudoVentures/cudos-node/app"
 	appparams "github.com/CudoVentures/cudos-node/app/params"
 	cudoMintKeeper "github.com/CudoVentures/cudos-node/x/cudoMint/keeper"
 	cudoMinttypes "github.com/CudoVentures/cudos-node/x/cudoMint/types"
 	gravitytypes "github.com/althea-net/cosmos-gravity-bridge/module/x/gravity/types"
 	"github.com/cosmos/cosmos-sdk/baseapp"
-
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
-	"github.com/cosmos/cosmos-sdk/simapp"
+	"github.com/cosmos/cosmos-sdk/testutil/sims"
 	"github.com/cosmos/cosmos-sdk/testutil/testdata"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 
 	adminkeeper "github.com/CudoVentures/cudos-node/x/admin/keeper"
+	cometbftdb "github.com/cometbft/cometbft-db"
+	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/libs/log"
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	tmtypes "github.com/cometbft/cometbft/types"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	abci "github.com/tendermint/tendermint/abci/types"
-	"github.com/tendermint/tendermint/libs/log"
-	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
-	tmtypes "github.com/tendermint/tendermint/types"
-	dbm "github.com/tendermint/tm-db"
 )
 
 // SimAppChainID hardcoded chainID for simulation
@@ -70,7 +72,7 @@ type KeeperTestHelper struct {
 }
 
 func (s *KeeperTestHelper) Setup(_ *testing.T, chainID string) {
-	s.App = SetupApp(s.T())
+	s.App = SetupApp(s.T(), chainID)
 	s.Ctx = s.App.BaseApp.NewContext(false, tmproto.Header{Height: 1, ChainID: chainID, Time: time.Now().UTC()})
 	s.CheckCtx = s.App.BaseApp.NewContext(true, tmproto.Header{Height: 1, ChainID: chainID, Time: time.Now().UTC()})
 	s.QueryHelper = &baseapp.QueryServiceTestHelper{
@@ -93,26 +95,11 @@ func (s *KeeperTestHelper) Setup(_ *testing.T, chainID string) {
 
 // DefaultConsensusParams defines the default Tendermint consensus params used
 // in app testing.
-var DefaultConsensusParams = &abci.ConsensusParams{
-	Block: &abci.BlockParams{
-		MaxBytes: 200000,
-		MaxGas:   2000000,
-	},
-	Evidence: &tmproto.EvidenceParams{
-		MaxAgeNumBlocks: 302400,
-		MaxAgeDuration:  504 * time.Hour, // 3 weeks is the max duration
-		MaxBytes:        10000,
-	},
-	Validator: &tmproto.ValidatorParams{
-		PubKeyTypes: []string{
-			tmtypes.ABCIPubKeyTypeEd25519,
-		},
-	},
-}
+var DefaultConsensusParams = sims.DefaultConsensusParams
 
-func SetupApp(t *testing.T) *app.App {
+func SetupApp(t *testing.T, chainId string) *app.App {
 	t.Helper()
-	privVal := NewPV()
+	privVal := mock.NewPV()
 	pubKey, err := privVal.GetPubKey()
 	require.NoError(t, err)
 	// create validator set with single validator
@@ -126,17 +113,17 @@ func SetupApp(t *testing.T) *app.App {
 		Address: acc.GetAddress().String(),
 		Coins:   sdk.NewCoins(sdk.NewCoin(appparams.BondDenom, MinSelfDelegation.Mul(sdk.NewIntFromUint64(10)))),
 	}
-	return SetupWithGenesisValSet(t, valSet, []authtypes.GenesisAccount{acc}, balance)
+	return SetupWithGenesisValSet(t, valSet, []authtypes.GenesisAccount{acc}, chainId, balance)
 }
 
 // SetupWithGenesisValSet initializes a new app with a validator set and genesis accounts
 // that also act as delegators. For simplicity, each validator is bonded with a delegation
 // of one consensus engine unit in the default token of the app from first genesis
 // account. A Nop logger is set in app.
-func SetupWithGenesisValSet(t *testing.T, valSet *tmtypes.ValidatorSet, genAccs []authtypes.GenesisAccount, balances ...banktypes.Balance) *app.App {
+func SetupWithGenesisValSet(t *testing.T, valSet *tmtypes.ValidatorSet, genAccs []authtypes.GenesisAccount, chainId string, balances ...banktypes.Balance) *app.App {
 	t.Helper()
 
-	cudosApp, genesisState := setup(true, 5)
+	cudosApp, genesisState := setup(true, 5, chainId)
 	genesisState = genesisStateWithValSet(t, cudosApp, genesisState, valSet, genAccs, balances...)
 
 	stateBytes, err := json.MarshalIndent(genesisState, "", " ")
@@ -166,8 +153,8 @@ func SetupWithGenesisValSet(t *testing.T, valSet *tmtypes.ValidatorSet, genAccs 
 	return cudosApp
 }
 
-func setup(withGenesis bool, invCheckPeriod uint) (*app.App, app.GenesisState) {
-	db := dbm.NewMemDB()
+func setup(withGenesis bool, invCheckPeriod uint, chainId string) (*app.App, app.GenesisState) {
+	db := cometbftdb.NewMemDB()
 	encCdc := app.MakeEncodingConfig()
 
 	cudosApp := app.New(
@@ -178,8 +165,8 @@ func setup(withGenesis bool, invCheckPeriod uint) (*app.App, app.GenesisState) {
 		map[int64]bool{},
 		app.DefaultNodeHome,
 		invCheckPeriod,
-		encCdc,
-		simapp.EmptyAppOptions{},
+		sims.EmptyAppOptions{},
+		baseapp.SetChainID(chainId),
 	)
 	if withGenesis {
 		return cudosApp, app.NewDefaultGenesisState(encCdc.Codec)
@@ -224,9 +211,6 @@ func genesisStateWithValSet(t *testing.T,
 		delegations = append(delegations, stakingtypes.NewDelegation(genAccs[0].GetAddress(), val.Address.Bytes(), sdk.OneDec()))
 
 	}
-	pk, _ := cryptocodec.FromTmPubKeyInterface(valSet.Validators[0].PubKey)
-
-	accAddr := sdk.AccAddress(pk.Address())
 
 	// set validators and delegations
 	defaultStParams := stakingtypes.DefaultParams()
@@ -236,6 +220,7 @@ func genesisStateWithValSet(t *testing.T,
 		defaultStParams.MaxEntries,
 		defaultStParams.HistoricalEntries,
 		appparams.BondDenom,
+		stakingtypes.DefaultMinCommissionRate,
 	)
 
 	// set validators and delegations
@@ -265,10 +250,14 @@ func genesisStateWithValSet(t *testing.T,
 		balances,
 		totalSupply,
 		[]banktypes.Metadata{},
+		[]banktypes.SendEnabled{},
 	)
 
 	genesisState[banktypes.ModuleName] = app.AppCodec().MustMarshalJSON(bankGenesis)
 
+	pk, _ := cryptocodec.FromTmPubKeyInterface(valSet.Validators[0].PubKey)
+
+	accAddr := sdk.AccAddress(pk.Address())
 	// Custom Cudos logic for gravity module
 	// TODO: verify if true, maybe get the current snapshot of the gravity module genesis state
 
@@ -294,7 +283,6 @@ func genesisStateWithValSet(t *testing.T,
 	genesisState[gravitytypes.ModuleName] = app.AppCodec().MustMarshalJSON(gravityGenesis)
 
 	// Add gentxs, MsgCreateValidator and MsgSetOrchestratorAddress
-
 	return genesisState
 }
 
@@ -330,6 +318,17 @@ func (s *KeeperTestHelper) FundAcc(acc sdk.AccAddress, amounts sdk.Coins) {
 	s.Require().NoError(err)
 }
 
-// func (s *KeeperTestHelper) SetStaticValSet(cosmosAddress string) {
-// 	s.App.GravityKeeper.SetStaticValCosmosAddr(s.Ctx, cosmosAddress)
-// }
+func (s *KeeperTestHelper) ConfirmUpgradeSucceeded(upgradeName string, upgradeHeight int64) {
+	s.Ctx = s.Ctx.WithBlockHeight(upgradeHeight - 1)
+	plan := upgradetypes.Plan{Name: upgradeName, Height: upgradeHeight}
+	err := s.App.UpgradeKeeper.ScheduleUpgrade(s.Ctx, plan)
+	s.Require().NoError(err)
+	_, exists := s.App.UpgradeKeeper.GetUpgradePlan(s.Ctx)
+	s.Require().True(exists)
+
+	s.Ctx = s.Ctx.WithBlockHeight(upgradeHeight)
+	s.Require().NotPanics(func() {
+		beginBlockRequest := abci.RequestBeginBlock{}
+		s.App.BeginBlocker(s.Ctx, beginBlockRequest)
+	})
+}
